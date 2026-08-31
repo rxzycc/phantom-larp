@@ -1,0 +1,115 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Show repo layout
+        run: find . -maxdepth 2 -not -path './.git/*' | head -40
+
+      - name: Collect web assets
+        run: |
+          set -e
+          SRC="$(find . -name index.html -not -path './ios/*' -not -path './.git/*' -not -path './www/*' | head -1)"
+          if [ -z "$SRC" ]; then echo "No index.html found"; exit 1; fi
+          SRC="$(dirname "$SRC")"
+          echo "web root: $SRC"
+          mkdir -p www
+          if [ "$SRC" = "." ]; then
+            for f in *; do
+              case "$f" in www|ios|node_modules|package.json|capacitor.config.json) continue;; esac
+              cp -R "$f" www/
+            done
+          elif [ "$SRC" != "./www" ]; then
+            cp -R "$SRC"/. www/
+          fi
+          cd www
+          for f in icon-180 icon-192 icon-512 icon-1024; do
+            [ -f "$f.b64" ] && { base64 -D -i "$f.b64" -o "$f.png" 2>/dev/null || true; }
+          done
+          ls -la
+
+      - name: Write project files
+        run: |
+          cat > package.json <<'JSON'
+          {
+            "name": "phantom-demo",
+            "version": "1.0.0",
+            "private": true,
+            "dependencies": {
+              "@capacitor/core": "^6.1.2",
+              "@capacitor/ios": "^6.1.2",
+              "@capacitor/haptics": "^6.0.1"
+            },
+            "devDependencies": {
+              "@capacitor/cli": "^6.1.2"
+            }
+          }
+          JSON
+          cat > capacitor.config.json <<'JSON'
+          {
+            "appId": "com.demo.phantomdemo",
+            "appName": "Phantom Demo",
+            "webDir": "www",
+            "ios": { "contentInset": "never", "backgroundColor": "#000000" },
+            "backgroundColor": "#000000"
+          }
+          JSON
+
+      - name: Install and add iOS
+        run: |
+          npm install
+          npx cap add ios
+          npx cap sync ios
+
+      - name: App icon
+        run: |
+          ICONSET="ios/App/App/Assets.xcassets/AppIcon.appiconset"
+          if [ -f www/icon-1024.png ] && [ -d "$ICONSET" ]; then
+            sips -z 1024 1024 www/icon-1024.png --out "$ICONSET/AppIcon-512@2x.png" || true
+          fi
+
+      - name: Build unsigned
+        run: |
+          cd ios/App
+          xcodebuild -workspace App.xcworkspace -scheme App \
+            -configuration Release -sdk iphoneos -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
+          ls -la build/Build/Products/Release-iphoneos/
+
+      - name: Package IPA
+        run: |
+          mkdir -p Payload
+          cp -R ios/App/build/Build/Products/Release-iphoneos/App.app Payload/App.app
+          zip -qry Phantom-Demo.ipa Payload
+          ls -lh Phantom-Demo.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Phantom-Demo-ipa
+          path: Phantom-Demo.ipa
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Phantom Demo
+          tag_name: v1.0.${{ github.run_number }}
+          files: Phantom-Demo.ipa
+          body: |
+            Phantom Demo — unsigned iOS build.
+
+            Not code-signed. Sideload with Sideloadly or AltStore using your
+            Apple ID (free accounts expire every 7 days).
+
+            UI simulation only — no blockchain, no keys, no real funds.
