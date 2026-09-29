@@ -1,4 +1,4 @@
-const CACHE = "phantom-v80";
+const CACHE = "phantom-v83";
 const ASSETS = ["./", "./index.html", "./app.js", "./styles.css", "./manifest.webmanifest", "./splash.png", "./icon-180.png", "./icon-192.png", "./icon-512.png"];
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
@@ -9,7 +9,8 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET") return;
   const url = new URL(e.request.url);
-  if (/coingecko\.com|dexscreener\.com/.test(url.href)) return; // always live
+  if (url.origin === self.location.origin && url.pathname.startsWith("/api/")) return; // live prices
+  if (/coingecko\.com|dexscreener\.com|coinbase\.com/.test(url.href)) return; // always live
   const remoteLogo = /clearbit\.com|jsdelivr\.net|google\.com\/s2\/favicons|coin-images\.coingecko\.com|financialmodelingprep\.com|duckduckgo\.com|dexscreener\.com\/.*\.(png|jpg|webp)/.test(url.href);
   if (remoteLogo) {
     // stale-while-revalidate so logos survive going offline
